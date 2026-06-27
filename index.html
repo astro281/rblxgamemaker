@@ -182,7 +182,7 @@
     const subNameGroup = document.getElementById('subNameGroup');
     const statusMessage = document.getElementById('statusMessage');
 
-    const PROXY = "https://api.allorigins.win/raw?url=";
+    const PROXY = "https://corsproxy.io/?";
 
     if (localStorage.getItem('rblx_cookie')) {
         document.getElementById('cookie').value = localStorage.getItem('rblx_cookie');
@@ -297,7 +297,7 @@
                 statusMessage.textContent = '[Step 4/4] Allocating sub-place frameworks...';
                 let subRes;
                 try {
-                    subRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/user/universes/${uId}/places`), {
+                    subRes = await fetch(PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/user/universes/" + uId + "/places"), {
                         method: "POST",
                         headers: openCloudHeaders,
                         body: JSON.stringify({ templatePlaceId: 95206881 })
