@@ -182,7 +182,7 @@
     const subNameGroup = document.getElementById('subNameGroup');
     const statusMessage = document.getElementById('statusMessage');
 
-    const PROXY = "https://corsproxy.io/?";
+    const PROXY = "https://api.allorigins.win/raw?url=";
 
     if (localStorage.getItem('rblx_cookie')) {
         document.getElementById('cookie').value = localStorage.getItem('rblx_cookie');
@@ -199,7 +199,7 @@
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         statusMessage.style.color = '#38bdf8';
-        statusMessage.textContent = 'Initializing engine deployment...';
+        statusMessage.textContent = 'Initializing configuration engine...';
 
         const rawCookie = document.getElementById('cookie').value;
         const cookieVal = rawCookie.includes('.ROBLOSECURITY=') ? rawCookie.split('.ROBLOSECURITY=')[1] : rawCookie;
@@ -225,86 +225,53 @@
         const mapXml = enableHttp ? xmlWithHttp : xmlNoHttp;
 
         try {
-            statusMessage.textContent = 'Fetching security validation handshake...';
-            const authRes = await fetch(PROXY + encodeURIComponent("https://auth.roblox.com/v2/logout"), {
-                method: "POST",
-                headers: { "Cookie": `.ROBLOSECURITY=${cookieVal}` }
-            });
-            const csrfToken = authRes.headers.get("x-csrf-token");
-
-            if (!csrfToken) {
-                throw new Error("Unable to obtain security token. Verify your cookie value.");
-            }
-
-            const globalHeaders = {
-                "Cookie": `.ROBLOSECURITY=${cookieVal}`,
-                "x-csrf-token": csrfToken,
+            statusMessage.textContent = 'Deploying structure via Open Cloud...';
+            const openCloudHeaders = {
+                "x-api-key": apiKeyVal,
                 "Content-Type": "application/json"
             };
 
-            statusMessage.textContent = 'Creating instance sandbox...';
             const createRes = await fetch(PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/universes/create"), {
                 method: "POST",
-                headers: globalHeaders,
+                headers: openCloudHeaders,
                 body: JSON.stringify({ templatePlaceId: 95206881 })
             });
             const createData = await createRes.json();
             const uId = createData.universeId;
             const pId = createData.rootPlaceId;
 
-            if (!uId) throw new Error("Creation payload rejected.");
+            if (!uId) throw new Error("API credentials or validation rejected.");
 
-            statusMessage.textContent = 'Applying rig and environment settings...';
-            const configPayload = { name: gameName, avatarType: avatarType, universeAvatarType: avatarType };
-            if (avatarChoice === "3") configPayload.universeAnimationType = "Standard";
-
-            await fetch(PROXY + encodeURIComponent(`https://develop.roblox.com/v1/universes/${uId}/configuration`), {
-                method: "PATCH",
-                headers: globalHeaders,
-                body: JSON.stringify(configPayload)
-            });
-
-            let subPId = null;
-            if (wantSub) {
-                statusMessage.textContent = 'Allocating secondary sub-places...';
-                const subRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/user/universes/${uId}/places`), {
-                    method: "POST",
-                    headers: {
-                        "x-api-key": apiKeyVal,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({ templatePlaceId: 95206881 })
-                });
-                const subData = await subRes.json();
-                subPId = subData.placeId;
-
-                if (subPId) {
-                    await fetch(PROXY + encodeURIComponent(`https://develop.roblox.com/v1/places/${subPId}`), {
-                        method: "PATCH",
-                        headers: globalHeaders,
-                        body: JSON.stringify({ name: subName, description: "Automated Sub Place" })
-                    });
-                }
-            }
-
-            statusMessage.textContent = 'Publishing map file assets...';
-            const openCloudHeaders = {
+            statusMessage.textContent = 'Publishing map file layouts...';
+            const xmlHeaders = {
                 "x-api-key": apiKeyVal,
                 "Content-Type": "application/xml"
             };
 
             await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${pId}/versions?versionType=Published`), {
                 method: "POST",
-                headers: openCloudHeaders,
+                headers: xmlHeaders,
                 body: mapXml
             });
 
-            if (wantSub && subPId) {
-                await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${subPId}/versions?versionType=Published`), {
+            let subPId = null;
+            if (wantSub) {
+                statusMessage.textContent = 'Generating secondary place instance...';
+                const subRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/user/universes/${uId}/places`), {
                     method: "POST",
                     headers: openCloudHeaders,
-                    body: mapXml
+                    body: JSON.stringify({ templatePlaceId: 95206881 })
                 });
+                const subData = await subRes.json();
+                subPId = subData.placeId;
+
+                if (subPId) {
+                    await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${subPId}/versions?versionType=Published`), {
+                        method: "POST",
+                        headers: xmlHeaders,
+                        body: mapXml
+                    });
+                }
             }
 
             statusMessage.style.color = '#4ade80';
@@ -314,7 +281,7 @@
 
         } catch (err) {
             statusMessage.style.color = '#f87171';
-            statusMessage.textContent = 'Compilation Error: ' + err.message;
+            statusMessage.textContent = 'Error: ' + err.message;
         }
     });
 </script>
