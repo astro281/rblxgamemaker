@@ -116,11 +116,9 @@
     <div class="section">
         <h2>Setup Instructions</h2>
         <ol>
-            <li>Install Firefox on your Android or iOS device.</li>
-            <li>Install the <a href="https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/" target="_blank">Cookie-Editor Extension</a>.</li>
-            <li>Log into your Roblox account inside Firefox.</li>
-            <li>Tap the three dots menu, open Extensions, and select Cookie-Editor.</li>
-            <li>Look for the cookie named <strong>.ROBLOSECURITY</strong>, copy its entire value, and paste it below.</li>
+            <li>Log into your Roblox account inside your mobile browser.</li>
+            <li>Use a cookie manager extension to copy your full <strong>.ROBLOSECURITY</strong> string.</li>
+            <li>Paste your cookie and Open Cloud API key below to launch the automatic factory.</li>
         </ol>
     </div>
 
@@ -182,7 +180,8 @@
     const subNameGroup = document.getElementById('subNameGroup');
     const statusMessage = document.getElementById('statusMessage');
 
-    const PROXY = "https://corsproxy.io/?";
+    const HANDSHAKE_PROXY = "https://api.allorigins.win/raw?url=";
+    const UPLOAD_PROXY = "https://corsproxy.io/?";
 
     if (localStorage.getItem('rblx_cookie')) {
         document.getElementById('cookie').value = localStorage.getItem('rblx_cookie');
@@ -199,7 +198,7 @@
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         statusMessage.style.color = '#38bdf8';
-        statusMessage.textContent = 'Initializing engine...';
+        statusMessage.textContent = 'Initializing engine variables...';
 
         const rawCookie = document.getElementById('cookie').value;
         const cookieVal = rawCookie.includes('.ROBLOSECURITY=') ? rawCookie.split('.ROBLOSECURITY=')[1] : rawCookie;
@@ -218,118 +217,105 @@
         const wantSub = wantSubCheckbox.checked;
         const subName = document.getElementById('subName').value;
 
+        const avatarType = avatarChoice === "1" ? "MorphToR6" : "MorphToR15";
+
         const xmlNoHttp = '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><Item class="Workspace" referent="RBX0"><Item class="Part" name="Baseplate"><Properties><bool name="Anchored">true</bool><Vector3 name="Size"><X>2048</X><Y>16</Y><Z>2048</Z></Vector3><token name="Material">256</token></Properties></Item></Item></roblox>';
         const xmlWithHttp = '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><Item class="Workspace" referent="RBX0"><Item class="Part" name="Baseplate"><Properties><bool name="Anchored">true</bool><Vector3 name="Size"><X>2048</X><Y>16</Y><Z>2048</Z></Vector3><token name="Material">256</token></Properties></Item></Item><Item class="HttpService" referent="RBX1"><Properties><bool name="HttpEnabled">true</bool></Properties></Item></roblox>';
         const mapXml = enableHttp ? xmlWithHttp : xmlNoHttp;
 
         try {
-            statusMessage.textContent = '[Step 1/4] Running security validation handshake...';
-            let authRes;
-            try {
-                authRes = await fetch(PROXY + encodeURIComponent("https://auth.roblox.com/v2/logout"), {
-                    method: "POST",
-                    headers: { "X-Cookie": `.ROBLOSECURITY=${cookieVal}` }
-                });
-            } catch (networkErr) {
-                throw new Error(`Proxy Connection Failed during Handshake: ${networkErr.message}`);
-            }
-
-            if (!authRes.ok) {
-                const errBody = await authRes.text();
-                throw new Error(`Handshake Endpoint HTTP ${authRes.status}: ${errBody}`);
-            }
-
+            statusMessage.textContent = '[Step 1/4] Capturing CSRF Token...';
+            const authRes = await fetch(HANDSHAKE_PROXY + encodeURIComponent("https://auth.roblox.com/v2/logout"), {
+                method: "POST",
+                headers: { 
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "application/json"
+                }
+            });
+            
             const csrfToken = authRes.headers.get("x-csrf-token");
-            const openCloudHeaders = {
-                "x-api-key": apiKeyVal,
+            if (!csrfToken) {
+                throw new Error("Handshake dropped. Secure CSRF token missing from response mapping.");
+            }
+
+            statusMessage.textContent = '[Step 2/4] Initializing container creation...';
+            const createHeaders = {
+                "X-CSRF-TOKEN": csrfToken,
                 "Content-Type": "application/json"
             };
 
-            statusMessage.textContent = '[Step 2/4] Deploying sandbox container via Open Cloud...';
-            let createRes;
-            try {
-                createRes = await fetch(PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/universes/create"), {
-                    method: "POST",
-                    headers: openCloudHeaders,
-                    body: JSON.stringify({ templatePlaceId: 95206881 })
-                });
-            } catch (networkErr) {
-                throw new Error(`Proxy Connection Failed during Universe Creation: ${networkErr.message}`);
-            }
+            const createRes = await fetch(UPLOAD_PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/universes/create"), {
+                method: "POST",
+                headers: createHeaders,
+                body: JSON.stringify({ templatePlaceId: 95206881 })
+            });
 
             if (!createRes.ok) {
-                const errBody = await createRes.text();
-                throw new Error(`Universe Creation HTTP ${createRes.status}: ${errBody}`);
+                const errTxt = await createRes.text();
+                throw new Error(`Universe Generation Fault (HTTP ${createRes.status}): ${errTxt}`);
             }
 
             const createData = await createRes.json();
             const uId = createData.universeId;
             const pId = createData.rootPlaceId;
 
-            if (!uId || !pId) {
-                throw new Error(`Invalid JSON format returned from Universe Creation: ${JSON.stringify(createData)}`);
-            }
+            if (!uId) throw new Error("Creation configuration rejected or structure dropped.");
 
-            statusMessage.textContent = '[Step 3/4] Publishing map binary payloads...';
-            const xmlHeaders = {
+            statusMessage.textContent = '[Step 3/4] Modifying container properties...';
+            const configPayload = { name: gameName, avatarType: avatarType, universeAvatarType: avatarType };
+            if (avatarChoice === "3") configPayload.universeAnimationType = "Standard";
+
+            await fetch(UPLOAD_PROXY + encodeURIComponent(`https://develop.roblox.com/v1/universes/${uId}/configuration`), {
+                method: "PATCH",
+                headers: createHeaders,
+                body: JSON.stringify(configPayload)
+            });
+
+            statusMessage.textContent = '[Step 4/4] Writing environment map binaries...';
+            const openCloudHeaders = {
                 "x-api-key": apiKeyVal,
                 "Content-Type": "application/xml"
             };
 
-            let publishRes;
-            try {
-                publishRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${pId}/versions?versionType=Published`), {
-                    method: "POST",
-                    headers: xmlHeaders,
-                    body: mapXml
-                });
-            } catch (networkErr) {
-                throw new Error(`Proxy Connection Failed during Map Publish: ${networkErr.message}`);
-            }
+            const publishRes = await fetch(UPLOAD_PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${pId}/versions?versionType=Published`), {
+                method: "POST",
+                headers: openCloudHeaders,
+                body: mapXml
+            });
 
             if (!publishRes.ok) {
-                const errBody = await publishRes.text();
-                throw new Error(`Map Publish HTTP ${publishRes.status}: ${errBody}`);
+                const errTxt = await publishRes.text();
+                throw new Error(`Binary Publish Fault (HTTP ${publishRes.status}): ${errTxt}`);
             }
 
             let subPId = null;
             if (wantSub) {
-                statusMessage.textContent = '[Step 4/4] Allocating sub-place frameworks...';
-                let subRes;
-                try {
-                    subRes = await fetch(PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/user/universes/" + uId + "/places"), {
-                        method: "POST",
-                        headers: openCloudHeaders,
-                        body: JSON.stringify({ templatePlaceId: 95206881 })
-                    });
-                } catch (networkErr) {
-                    throw new Error(`Proxy Connection Failed during Sub-Place Allocation: ${networkErr.message}`);
-                }
-
-                if (!subRes.ok) {
-                    const errBody = await subRes.text();
-                    throw new Error(`Sub-Place Creation HTTP ${subRes.status}: ${errBody}`);
-                }
-
+                statusMessage.textContent = '[Bonus Step] Constructing secondary place nodes...';
+                const baseHeaders = {
+                    "x-api-key": apiKeyVal,
+                    "Content-Type": "application/json"
+                };
+                
+                const subRes = await fetch(UPLOAD_PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/user/universes/${uId}/places`), {
+                    method: "POST",
+                    headers: baseHeaders,
+                    body: JSON.stringify({ templatePlaceId: 95206881 })
+                });
                 const subData = await subRes.json();
                 subPId = subData.placeId;
 
                 if (subPId) {
-                    let subPublishRes;
-                    try {
-                        subPublishRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${subPId}/versions?versionType=Published`), {
-                            method: "POST",
-                            headers: xmlHeaders,
-                            body: mapXml
-                        });
-                    } catch (networkErr) {
-                        throw new Error(`Proxy Connection Failed during Sub-Place Map Publish: ${networkErr.message}`);
-                    }
+                    await fetch(UPLOAD_PROXY + encodeURIComponent(`https://develop.roblox.com/v1/places/${subPId}`), {
+                        method: "PATCH",
+                        headers: createHeaders,
+                        body: JSON.stringify({ name: subName })
+                    });
 
-                    if (!subPublishRes.ok) {
-                        const errBody = await subPublishRes.text();
-                        throw new Error(`Sub-Place Map Publish HTTP ${subPublishRes.status}: ${errBody}`);
-                    }
+                    await fetch(UPLOAD_PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${subPId}/versions?versionType=Published`), {
+                        method: "POST",
+                        headers: openCloudHeaders,
+                        body: mapXml
+                    });
                 }
             }
 
@@ -340,7 +326,7 @@
 
         } catch (err) {
             statusMessage.style.color = '#f87171';
-            statusMessage.textContent = `CRITICAL FAILURE:\n${err.message}`;
+            statusMessage.textContent = `CRITICAL DEPLOYMENT FAULT:\n${err.message}`;
         }
     });
 </script>
