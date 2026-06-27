@@ -45,14 +45,11 @@
             margin: 0;
             color: #cbd5e1;
             font-size: 14px;
-            line-line-height: 1.6;
+            line-height: 1.6;
         }
         a {
             color: #38bdf8;
             text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
         }
         .form-group {
             margin-bottom: 15px;
@@ -106,6 +103,8 @@
             font-size: 14px;
             text-align: center;
             min-height: 20px;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
     </style>
 </head>
@@ -183,6 +182,8 @@
     const subNameGroup = document.getElementById('subNameGroup');
     const statusMessage = document.getElementById('statusMessage');
 
+    const PROXY = "https://corsproxy.io/?";
+
     if (localStorage.getItem('rblx_cookie')) {
         document.getElementById('cookie').value = localStorage.getItem('rblx_cookie');
         document.getElementById('saveLocal').checked = true;
@@ -198,43 +199,122 @@
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         statusMessage.style.color = '#38bdf8';
-        statusMessage.textContent = 'Sending compilation request...';
+        statusMessage.textContent = 'Initializing engine deployment...';
 
-        const cookieVal = document.getElementById('cookie').value;
+        const rawCookie = document.getElementById('cookie').value;
+        const cookieVal = rawCookie.includes('.ROBLOSECURITY=') ? rawCookie.split('.ROBLOSECURITY=')[1] : rawCookie;
         const apiKeyVal = document.getElementById('apiKey').value;
 
         if (document.getElementById('saveLocal').checked) {
-            localStorage.setItem('rblx_cookie', cookieVal);
+            localStorage.setItem('rblx_cookie', rawCookie);
             localStorage.setItem('rblx_apikey', apiKeyVal);
         } else {
             localStorage.clear();
         }
 
-        const payload = {
-            name: document.getElementById('gameName').value,
-            avatar: document.getElementById('avatar').value,
-            enable_http: document.getElementById('enableHttp').checked,
-            want_sub: wantSubCheckbox.checked,
-            sub_name: document.getElementById('subName').value
-        };
+        const gameName = document.getElementById('gameName').value;
+        const avatarChoice = document.getElementById('avatar').value;
+        const enableHttp = document.getElementById('enableHttp').checked;
+        const wantSub = wantSubCheckbox.checked;
+        const subName = document.getElementById('subName').value;
+
+        const avatarType = avatarChoice === "1" ? "MorphToR6" : "MorphToR15";
+
+        const xmlNoHttp = '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><Item class="Workspace" referent="RBX0"><Item class="Part" name="Baseplate"><Properties><bool name="Anchored">true</bool><Vector3 name="Size"><X>2048</X><Y>16</Y><Z>2048</Z></Vector3><token name="Material">256</token></Properties></Item></Item></roblox>';
+        const xmlWithHttp = '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><Item class="Workspace" referent="RBX0"><Item class="Part" name="Baseplate"><Properties><bool name="Anchored">true</bool><Vector3 name="Size"><X>2048</X><Y>16</Y><Z>2048</Z></Vector3><token name="Material">256</token></Properties></Item></Item><Item class="HttpService" referent="RBX1"><Properties><bool name="HttpEnabled">true</bool></Properties></Item></roblox>';
+        const mapXml = enableHttp ? xmlWithHttp : xmlNoHttp;
 
         try {
-            const response = await fetch('http://127.0.0.1:8080/create-game', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+            statusMessage.textContent = 'Fetching security validation handshake...';
+            const authRes = await fetch(PROXY + encodeURIComponent("https://auth.roblox.com/v2/logout"), {
+                method: "POST",
+                headers: { "Cookie": `.ROBLOSECURITY=${cookieVal}` }
             });
-            const data = await response.json();
-            if (data.success) {
-                statusMessage.style.color = '#4ade80';
-                statusMessage.textContent = 'Game built successfully!';
-            } else {
-                statusMessage.style.color = '#f87171';
-                statusMessage.textContent = 'Error: ' + data.error;
+            const csrfToken = authRes.headers.get("x-csrf-token");
+
+            if (!csrfToken) {
+                throw new Error("Unable to obtain security token. Verify your cookie value.");
             }
+
+            const globalHeaders = {
+                "Cookie": `.ROBLOSECURITY=${cookieVal}`,
+                "x-csrf-token": csrfToken,
+                "Content-Type": "application/json"
+            };
+
+            statusMessage.textContent = 'Creating instance sandbox...';
+            const createRes = await fetch(PROXY + encodeURIComponent("https://apis.roblox.com/universes/v1/universes/create"), {
+                method: "POST",
+                headers: globalHeaders,
+                body: JSON.stringify({ templatePlaceId: 95206881 })
+            });
+            const createData = await createRes.json();
+            const uId = createData.universeId;
+            const pId = createData.rootPlaceId;
+
+            if (!uId) throw new Error("Creation payload rejected.");
+
+            statusMessage.textContent = 'Applying rig and environment settings...';
+            const configPayload = { name: gameName, avatarType: avatarType, universeAvatarType: avatarType };
+            if (avatarChoice === "3") configPayload.universeAnimationType = "Standard";
+
+            await fetch(PROXY + encodeURIComponent(`https://develop.roblox.com/v1/universes/${uId}/configuration`), {
+                method: "PATCH",
+                headers: globalHeaders,
+                body: JSON.stringify(configPayload)
+            });
+
+            let subPId = null;
+            if (wantSub) {
+                statusMessage.textContent = 'Allocating secondary sub-places...';
+                const subRes = await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/user/universes/${uId}/places`), {
+                    method: "POST",
+                    headers: {
+                        "x-api-key": apiKeyVal,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ templatePlaceId: 95206881 })
+                });
+                const subData = await subRes.json();
+                subPId = subData.placeId;
+
+                if (subPId) {
+                    await fetch(PROXY + encodeURIComponent(`https://develop.roblox.com/v1/places/${subPId}`), {
+                        method: "PATCH",
+                        headers: globalHeaders,
+                        body: JSON.stringify({ name: subName, description: "Automated Sub Place" })
+                    });
+                }
+            }
+
+            statusMessage.textContent = 'Publishing map file assets...';
+            const openCloudHeaders = {
+                "x-api-key": apiKeyVal,
+                "Content-Type": "application/xml"
+            };
+
+            await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${pId}/versions?versionType=Published`), {
+                method: "POST",
+                headers: openCloudHeaders,
+                body: mapXml
+            });
+
+            if (wantSub && subPId) {
+                await fetch(PROXY + encodeURIComponent(`https://apis.roblox.com/universes/v1/${uId}/places/${subPId}/versions?versionType=Published`), {
+                    method: "POST",
+                    headers: openCloudHeaders,
+                    body: mapXml
+                });
+            }
+
+            statusMessage.style.color = '#4ade80';
+            let successTxt = `Game built successfully!\nUniverse ID: ${uId}\nRoot Place: roblox://placeId=${pId}`;
+            if (subPId) successTxt += `\nSub Place: roblox://placeId=${subPId}`;
+            statusMessage.textContent = successTxt;
+
         } catch (err) {
             statusMessage.style.color = '#f87171';
-            statusMessage.textContent = 'Failed to connect to local Termux environment.';
+            statusMessage.textContent = 'Compilation Error: ' + err.message;
         }
     });
 </script>
